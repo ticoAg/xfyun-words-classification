@@ -23,7 +23,7 @@ class BertBaseClassifier(BaseClassifier):
         super().__init__(train, test)
         self.model_name = "hfl/chinese-macbert-large"
         self.max_length = 256
-        self.batch_size = 16
+        self.batch_size = 8
         self.epochs = 3
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.le = LabelEncoder()
@@ -73,6 +73,7 @@ class BertBaseClassifier(BaseClassifier):
         training_args = TrainingArguments(
             output_dir="./macbert_baseline_ckpt",
             per_device_train_batch_size=self.batch_size,
+            per_device_eval_batch_size=self.batch_size,
             num_train_epochs=self.epochs,
             save_strategy="steps",  # 修正为steps
             logging_steps=50,
