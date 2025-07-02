@@ -11,3 +11,4 @@ wheels/
 wandb/
 ckpts/
 *.pkl
+.env
