@@ -10,6 +10,7 @@ dependencies = [
     "charset-normalizer==3.4.2",
     "colorama==0.4.6",
     "datasets>=2.14.4",
+    "dotenv>=0.9.9",
     "filelock==3.18.0",
     "fsspec==2025.5.1",
     "hf-xet>=1.1.5",
