@@ -10,6 +10,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 from torch.nn import functional as F
+from tqdm import trange
 from transformers import AutoTokenizer, BertForSequenceClassification
 from transformers.trainer import Trainer
 from transformers.training_args import TrainingArguments
@@ -53,6 +54,10 @@ class BertBaseClassifier(BaseClassifier):
         self.trainer = None
         self.train_dataset = None
         self.test_dataset = None
+        # 初始化时直接从train获取类别并fit
+        if train is not None and "类别" in train.columns:
+            self.label_classes = train["类别"].unique()
+            self.le.fit(self.label_classes)
 
     def preprocess(self, examples):
         return self.tokenizer(
@@ -210,22 +215,47 @@ class BertBaseClassifier(BaseClassifier):
         self.trainer.train(resume_from_checkpoint=resume_from_checkpoint)
         wandb.finish()
 
-    def predict(self):
-        # 如果模型未加载，则加载模型
-        if self.model is None:
+    def load_model_from_checkpoint(self, checkpoint_path=None):
+        """
+        加载指定checkpoint权重，或自动查找./ckpts下最新checkpoint，若都没有则加载原始模型。
+        """
+        ckpt_to_load = None
+        if checkpoint_path is not None:
+            ckpt_to_load = checkpoint_path
+        else:
+            checkpoints = list(Path("./ckpts").glob("checkpoint-*/"))
+            if checkpoints:
+                checkpoints.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+                ckpt_to_load = str(checkpoints[0])
+        if ckpt_to_load is not None:
+            logger.info(f"加载权重: {ckpt_to_load}")
+            self.model = BertForSequenceClassification.from_pretrained(
+                ckpt_to_load, num_labels=len(self.le.classes_)
+            ).to(self.device)
+        else:
+            logger.warning("未找到训练权重，加载原始预训练模型")
             self.model = BertForSequenceClassification.from_pretrained(
                 self.model_name, num_labels=len(self.le.classes_)
-            ).to(self.device)  # type: ignore
-            # 加载训练好的权重（如果有保存的话，可以在此处加载权重文件）
+            ).to(self.device)
+
+    def predict(self, checkpoint_path=None):
+        """
+        优先加载指定checkpoint权重，否则自动查找./ckpts下最新checkpoint。
+        若都没有，则回退加载原始模型。
+        """
+
+        if self.model is None:
+            self.load_model_from_checkpoint(checkpoint_path)
 
         # 测试集格式转换
         self.test_dataset = Dataset.from_pandas(self.test.loc[:, ["文本"]])
         self.test_dataset = self.test_dataset.map(self.preprocess, batched=True)
         preds = []
-        self.model.eval()
+        self.model.eval()  # type: ignore
+        bs = self.batch_size * 4
         with torch.no_grad():
-            for i in range(0, len(self.test_dataset), self.batch_size):
-                batch = self.test_dataset[i : i + self.batch_size]
+            for i in trange(0, len(self.test_dataset), bs):
+                batch = self.test_dataset[i : i + bs]
                 inputs = {
                     k: torch.tensor(batch[k]).to(self.device)
                     for k in ["input_ids", "attention_mask"]
@@ -275,7 +305,7 @@ if __name__ == "__main__":
     train, test, category_list = load_data(datasetp)
 
     clf = BertBaseClassifier(train, test)
-    clf.train_model()
+    # clf.train_model()
     result = clf.predict()
-    result.to_csv("macbert_wwm_baseline_predict.csv", index=False)
-    logger.info("预测完成，结果已保存到macbert_wwm_baseline_predict.csv")
+    result.to_csv(output_file, index=False)
+    logger.info(f"预测完成，结果已保存到{output_file}")
